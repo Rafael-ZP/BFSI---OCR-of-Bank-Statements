@@ -1,0 +1,11 @@
+streamlit
+easyocr
+pdf2image
+Pillow
+pandas
+matplotlib
+numpy
+tabulate
+langchain
+langchain-groq
+requests
