@@ -9,19 +9,19 @@
 ## Project Structure
 
 BFSI_OCR/         
-│── Semi_Supervised/
-
-│   ├── Api_Integration.py      # Fetches financial data via APIs
-│   ├── init.py
-│── Supervised/
-│   ├── Supervised.py           # Processes structured data like bank statements
-│   ├── init.py
-│── Unsupervised/
-│   ├── OCR_LLM.py              # Uses LLM to categorize uncategorized data
-│   ├── init.py
-│── App.py                      # Main application entry point
-
----
+│── Semi_Supervised/  
+│   ├── Api_Integration.py      # Fetches financial data via APIs  
+│   ├── __init__.py  
+│  
+│── Supervised/  
+│   ├── Supervised.py           # Processes structured data like bank statements  
+│   ├── __init__.py  
+│  
+│── Unsupervised/  
+│   ├── OCR_LLM.py              # Uses LLM to categorize uncategorized data  
+│   ├── __init__.py  
+│  
+│── App.py                      # Main application entry point  
 
 ## Features
 
