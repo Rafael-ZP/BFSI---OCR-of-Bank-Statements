@@ -1,11 +1,10 @@
-Here’s your README.md file with project details, including screenshots of the output. You can replace screenshot1.png, screenshot2.png, etc., with actual image file names.
-
 # BFSI_OCR-of-Bank-Statements
 
 ## Overview
 **BFSI_OCR-of-Bank-Statements** is a financial document processing system that extracts, categorizes, and visualizes data from various banking and financial documents using **OCR (Optical Character Recognition)** and **LLMs (Large Language Models)**. The project supports **supervised, semi-supervised, and unsupervised** learning techniques to analyze financial data.
 
----
+<img width="1512" alt="image" src="https://github.com/user-attachments/assets/ff2cc45e-eca4-4bc1-88a5-e89405781b5e" />
+
 
 ## Project Structure
 
@@ -45,23 +44,24 @@ BFSI_OCR/
 ## Installation
 
 ```sh
-git clone https://github.com/your-repo/BFSI_OCR.git
+git clone https://github.com/Rafael-ZP/BFSI_OCR-of-Bank-Statements.git
 cd BFSI_OCR
 pip install -r requirements.txt
+```
 
 Usage
 
 Running the Application
-
+```
 python App.py
-
+```
 Screenshots
 
-1️⃣ Extracting Data from OCR
+<img width="1512" alt="image" src="https://github.com/user-attachments/assets/4c58a66b-6fcb-4850-9478-78ad0c39c533" />
 
-2️⃣ Categorized Transactions
 
-3️⃣ Financial Trend Visualization
+<img width="1512" alt="image" src="https://github.com/user-attachments/assets/3e13ec1b-544e-49ad-99cc-68e8802caf2e" />
+
 
 Contributing
 
@@ -77,5 +77,3 @@ This `README.md`:
 ✅ Describes features & installation  
 ✅ Provides usage instructions  
 ✅ Adds placeholders for **screenshots**  
-
-You just need to **replace `screenshots/screenshot1.png`** with actual screenshot filenames in your repo. 🚀
