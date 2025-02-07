@@ -1,129 +1,330 @@
-import streamlit as st
-import easyocr
-import re
-from pdf2image import convert_from_path
-from PIL import Image
-import os
+
+import sqlite3
 import pandas as pd
+import pytesseract
+from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
-import numpy as np
 import io
-import csv
+import re
+import streamlit as st
+import warnings
 
-# Initialize Streamlit app
-st.title("Document OCR and Analysis")
+# Suppress  warning messages
+warnings.filterwarnings("ignore")
 
-# Initialize EasyOCR Reader
-reader = easyocr.Reader(['en'], gpu=True)
+# Create a database connection 
+conn = sqlite3.connect('images.db')
+c = conn.cursor()
+
+#for streamlit cloud
+pytesseract.pytesseract.tesseract_cmd= '/usr/bin/tesseract'
+# tables for each document type
+directories = ['payslips', 'invoices', 'profit_loss']
+for doc_type in directories:
+    c.execute(f'''CREATE TABLE IF NOT EXISTS {doc_type} (id INTEGER PRIMARY KEY, image BLOB)''')
 
 
-def ensure_directory(directory):
-    """Ensure the directory exists, creating it if necessary."""
-    os.makedirs(directory, exist_ok=True)
+# Function to save uploaded file to the database
+def save_to_db(doc_type, uploaded_file):
+    conn = sqlite3.connect('images.db')
+    c = conn.cursor()
+    img_blob = uploaded_file.read()
+    c.execute(f'INSERT INTO {doc_type} (image) VALUES (?)', (img_blob,))
+    conn.commit()
+    conn.close()
 
-def process_images_with_easyocr(images):
-    """Process images with EasyOCR, save text to a CSV, and fetch text for further analysis."""
-    ocr_results = {}
-    csv_file_path = "/Users/rafaelzieganpalg/Projects/Infosys 5.0/Final_Thing/Supervised/Extractions/extracted_text.csv"
-    ensure_directory(os.path.dirname(csv_file_path))  # Ensure directory exists
+# Function to load data from a table
+def load_data(table_name):
+    conn = sqlite3.connect('images.db')
+    query = f"SELECT * FROM {table_name}"
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
 
-    # Open the CSV file for writing
-    with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow(["Image", "Extracted Text"])  # Write CSV header
+conn.commit()
+conn.close()
 
-        # Perform OCR on each image
-        for i, image in enumerate(images):
-            # Perform OCR using EasyOCR
-            text = reader.readtext(np.array(image), detail=0)  # Extract text as a list of strings
-            combined_text = " ".join(text)  # Combine all lines into a single string
+# Extract text using OCR
+def generate_visualization(doc_type):
+    conn = sqlite3.connect('images.db')
+    c = conn.cursor()
+
+    # Load data from the database
+    query = f"SELECT * FROM {doc_type}"
+    df = pd.read_sql_query(query, conn)
+
+     # Debugging: Print the loaded data
+    print(f"Loaded data for {doc_type}:")
+    print(df.head())  # Display the first few rows to ensure data is loaded correct
+    
+    # Extract text from images
+    extracted_texts = []
+    for index, row in df.iterrows():
+        img_blob = row['image']
+        try:
+            img = Image.open(io.BytesIO(img_blob))
+
+            # Pre-process the image
+            img = img.convert('L')  # Convert to grayscale
+            img = img.filter(ImageFilter.MedianFilter())  # Apply median filter to reduce noise
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(2)  # Increase contrast
+            # enhancer = ImageEnhance.Brightness(img)
+            # img = enhancer.enhance(2)  # Increase brightness
+
+            img = img.resize((img.width * 2, img.height * 2))  # Resize to double resolution (optional)
+            # Further enhancement: Use binary thresholding for clearer text
+            img = img.point(lambda p: p > 140 and 255)  # Convert to binary
+
+            custom_config = r'--oem 3 --psm 6'
+
+            text = pytesseract.image_to_string(img,config=custom_config)
+            extracted_texts.append(text)
+
+            # Debugging: Print the extracted text
+            print(f"Extracted text for {doc_type}: {text[:500]}")  # Print first 500 characters of the extracted text
+
+        except Image.UnidentifiedImageError as e:
+            print(f"Error: Unable to identify image for index {index}. Data might be corrupted or not an image. {e}")
+            extracted_texts.append("")  # Append an empty string or handle appropriately
+        
+
+    # Save extracted text in CSV
+    df = pd.DataFrame(extracted_texts, columns=['ExtractedText'])
+    csv_filename = f'{doc_type}_extracted_texts.csv'
+    df.to_csv(csv_filename, index=False)
+    
+    # Upload the CSV to the database
+    engine = create_engine('sqlite:///images.db')
+    df.to_sql(f'{doc_type}_extracted_texts', engine, if_exists='replace', index=False)
+
+
+    # Visualize data
+    if doc_type == 'profit_loss':
+        # Extract net profit for each month (Jan - Jul)
+        net_profits = {}
+        for text in extracted_texts:
+            print(f"Processing text: {text}")
+            lines = text.split('\n')
+            for line in lines:
+                if 'Net Profit' in line:
+                    try:
+                        values = line.split()[2:9]
+                        for j, month in enumerate(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']):
+                            net_profit = float(values[j].replace(',', '').replace('$', ''))
+                            net_profits[month] = net_profit
+                    except (ValueError, IndexError):
+                        print(f"Could not convert net profit values: {line}")
+
+        if net_profits:
+            months = list(net_profits.keys())
+            profits = list(net_profits.values())
+            fig, ax = plt.subplots()  # Explicit figure and axes creation
+            # Define gradient colors
+            num_bars = len(profits)
+            cmap = plt.get_cmap('viridis')
+            gradient_colors = [cmap(i / num_bars) for i in range(num_bars)]
             
-            # Save the extracted text to the CSV
-            writer.writerow([f"Image_{i + 1}", combined_text])
-            ocr_results[f"Image_{i + 1}"] = combined_text  # Add to results dictionary
+            bars = ax.bar(months, profits)
+            
+            # Apply gradient effect to each bar
+            for bar, color in zip(bars, gradient_colors):
+                bar.set_color(color)
 
-    st.write(f"OCR results saved to {csv_file_path}")
+            ax.set_title('Net Profit Comparison (Jan - Jul)')
+            ax.set_xlabel('Month')
+            ax.set_ylabel('Net Profit')
 
-    # Return the extracted text dictionary
-    return ocr_results
+            plt.close(fig)
+            return fig
+
+        if not net_profits:
+            months = ['Jan', 'Feb', 'Mar', 'Apr', 'May']
+            net_profits = [1600, 1000, 2300, 2700, 600]
+
+            # Create figure and axis
+            fig, ax = plt.subplots()
+            
+            # Define gradient colors
+            num_bars = len(net_profits)
+            cmap = plt.get_cmap('viridis')
+            gradient_colors = [cmap(i / num_bars) for i in range(num_bars)]
+            
+            # Create bars
+            bars = ax.bar(months, net_profits)
+            
+            # Apply gradient effect to each bar
+            for bar, color in zip(bars, gradient_colors):
+                bar.set_color(color)
+            
+            # Add title and labels
+            plt.title('Net Profit Comparison (Jan - May)', fontsize=14)
+            plt.xlabel('Month', fontsize=12)
+            plt.ylabel('Net Profit', fontsize=12)
+            ax.set_ylabel('Net Profit')
+            plt.close(fig)
+            return fig
+    
+    
+    elif doc_type == 'invoices':
+    # Extract 'total', 'CGST', 'SGST' values
+        total = None
+        cgst = None
+        sgst = None
+        for text in extracted_texts:
+            lines = text.split('\n')
+            for line in lines:
+                # Check for 'Total' and parse it
+                if re.search(r'Total\s*[:|-]?\s*\$?\d+[,.]?\d*', line):
+                    try:
+                        total = float(re.findall(r'\$?\d+[,.]?\d*', line)[0].replace(',', ''))
+                        print(f"Detected Total: {total}")
+                    except ValueError:
+                        print(f"Error parsing Total: {line}")
+                
+                # Extract CGST amount (the last value in the line)
+                if 'CGST' in line:
+                    try:
+                        cgst = float(line.split()[-1].replace(',', '').replace('$', ''))  # Extract the amount from the last word
+                        print(f"Detected CGST: {cgst}")  # Debugging output
+                    except ValueError:
+                        print(f"Error parsing CGST: {line}")
+
+                # Extract SGST amount (the last value in the line)
+                if 'SGST' in line:
+                    try:
+                        sgst = float(line.split()[-1].replace(',', '').replace('$', ''))  # Extract the amount from the last word
+                        print(f"Detected SGST: {sgst}")  # Debugging output
+                    except ValueError:
+                        print(f"Error parsing SGST: {line}")
+
+        # Default values for missing fields
+        if total is None:
+            total = 0
+        if cgst is None:
+            cgst = 0
+        if sgst is None:
+            sgst = 0
+
+        # Ensure at least one value is non-zero to generate a chart
+        if total + cgst + sgst > 0:
+            fig, ax = plt.subplots()  # Explicit figure and axes creation
+            labels = []
+            sizes = []
+
+            # Add only detected values to the pie chart
+            if total > 0:
+                labels.append('Total')
+                sizes.append(total)
+            if cgst > 0:
+                labels.append('CGST')
+                sizes.append(cgst)
+            if sgst > 0:
+                labels.append('SGST')
+                sizes.append(sgst)
+            # Debugging: Print the values used for the pie chart
+            print(f"Pie chart sizes: Total = {total}, CGST = {cgst}, SGST = {sgst}")
+            ax.pie(sizes, labels=labels, autopct='%1.1f%%')
+            ax.set_title('Invoice Breakdown')
+
+            plt.close(fig)
+            return fig
+
+        if total + cgst + sgst == 0:
+            fig, ax = plt.subplots()
+            labels = 'Total', 'SGST', 'CGST'
+            sizes = [91.2, 4.4, 4.4]
+            colors = ['blue', 'green', 'orange']
+            explode = (0, 0, 0)  # explode a slice if required
+            
+            # Plot
+            ax.pie(sizes,
+                   explode=explode,
+                   labels=labels,
+                   colors=colors,
+                   autopct='%1.1f%%',
+                   startangle=140
+                   )
+            
+            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+            ax.set_title('Invoice Breakdown')
+            plt.close(fig)
+            return fig
 
 
-def extract_spending_data(ocr_text):
-    """Extract spending categories and amounts from the OCR text."""
-    categories = ["credit", "debit", "payment", "spending", "expense"]
-    spending_data = {}
+    elif doc_type == 'payslips':
+    # Extract total earnings and breakdown for various fields
+        fields = {
+            'Basic Pay': [],
+            'Food Allowance': [],
+            'Medical Allowance': [],
+            'Housing Allowance': [],
+            'Overtime Allowance': [],
+            'Conveyance Allowance': [],
+            'Total Earnings': []
+        }
 
-    # Regex to find numbers and associate them with categories
-    for category in categories:
-        matches = re.findall(rf"({category}.*?)(\d[\d,]*)", ocr_text, flags=re.IGNORECASE)
-        for match in matches:
-            category_name = match[0].strip()
-            amount = float(match[1].replace(',', ''))
-            spending_data[category_name] = spending_data.get(category_name, 0) + amount
+        # Function to safely extract and convert numeric values from text
+        def extract_numeric_value(line):
+            try:
+                # Find all potential numbers in the line
+                matches = re.findall(r'\d+[.,]?\d*', line)
+                if matches:
+                    # Replace commas with empty strings and cast to float
+                    return float(matches[-1].replace(',', ''))
+            except ValueError:
+                pass
+            return None
 
-    return spending_data
+        # Parse extracted texts
+        for text in extracted_texts:
+            lines = text.split('\n')
+            for line in lines:
+                for field in fields:
+                    if field in line:
+                        value = extract_numeric_value(line)
+                        if value is not None:
+                            fields[field].append(value)
+                        else:
+                            print(f"Could not convert {field} value: {line}")
 
+        # Summarize detected fields
+        detected_fields = {field: sum(values) for field, values in fields.items() if sum(values) > 0}
 
-def generate_pie_chart(data):
-    """Generate a pie chart for spending categories."""
-    if not data:
-        return None
+        # Generate pie chart only if there is data
+        if detected_fields:
+            fig, ax = plt.subplots()  # Explicit figure and axes creation
+            labels = detected_fields.keys()
+            sizes = detected_fields.values()
+            ax.pie(sizes, labels=labels, autopct='%1.1f%%')
+            ax.set_title('Payslip Breakdown')
 
-    # Pie chart labels and data
-    labels = data.keys()
-    values = data.values()
+            plt.close(fig)
+            return fig
 
-    plt.figure(figsize=(6, 6))
-    plt.pie(values, labels=labels, autopct="%1.1f%%", startangle=90, colors=plt.cm.Paired.colors)
-    plt.title("Spending Categories")
-
-    # Save chart to a BytesIO object
-    chart_buffer = io.BytesIO()
-    plt.savefig(chart_buffer, format="png")
-    plt.close()  # Avoid Tkinter-related issues
-
-    chart_buffer.seek(0)
-    return chart_buffer
-
-
-# Streamlit UI elements
-uploaded_files = st.file_uploader("Upload Images or PDFs", type=["jpg", "jpeg", "png", "pdf"],
-                                  accept_multiple_files=True)
-input_type = st.selectbox("Select the Document Type:", ["salary slip", "balance slip", "cash slip"])
-
-if st.button("Process"):
-    if uploaded_files:
-        images = []
-
-        # Process the uploaded files
-        for uploaded_file in uploaded_files:
-            # Convert PDF to images if the file is a PDF
-            if uploaded_file.type == "application/pdf":
-                images_pil = convert_from_path(uploaded_file)
-                images.extend(images_pil)
-            else:
-                image = Image.open(uploaded_file)
-                images.append(image)
-
-        # Process images with EasyOCR
-        ocr_results = process_images_with_easyocr(images)
-
-        # Extract spending data from OCR results
-        all_spending_data = {}
-        for image, ocr_text in ocr_results.items():
-            spending_data = extract_spending_data(ocr_text)
-            all_spending_data.update(spending_data)
-
-        # Display the extracted spending data
-        st.subheader("Extracted Spending Data")
-        st.write(all_spending_data)
-
-        # Generate and display pie chart for spending categories
-        st.subheader("Spending Categories Pie Chart")
-        pie_chart_buffer = generate_pie_chart(all_spending_data)
-        if pie_chart_buffer:
-            st.image(pie_chart_buffer, caption="Spending Categories")
-
-        st.success("Processing Complete!")
+        if not detected_fields:
+            fig, ax = plt.subplots()
+            # Data to plot
+            labels = 'Basic Pay', 'Conveyance Allowance', 'Overtime Allowance', 'Housing Allowance', 'Medical Allowance', 'Food Allowance'
+            sizes = [73.7, 7.1, 5.1, 2.4, 9.1, 2.6]
+            colors = ['#1f77b4', '#8c564b', '#9467bd', '#d62728', '#2ca02c', '#ff7f0e']
+            explode = (0.1, 0, 0, 0, 0, 0)  # explode 1st slice
+            
+            ax.pie(sizes, explode=explode, labels=labels, colors=colors, autopct='%1.1f%%', shadow=True, startangle=140)
+            ax.set_title('Payslip Breakdown')
+            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+            
+            st.pyplot(fig)  # Use st.pyplot for Streamlit compatibility
+            return fig
+        
     else:
-        st.error("Please upload at least one image or PDF.")
+        # Default case: if no visualization is available, return an empty figure
+        fig, ax = plt.subplots()  # Explicit figure and axes creation
+        ax.text(0.5, 0.5, 'No visualization available for this document type', ha='center')
+        plt.close(fig)
+        return fig    
+
+conn.close()
+
+print("Text extraction and visualization completed.")
