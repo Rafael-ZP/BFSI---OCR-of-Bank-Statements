@@ -70,11 +70,4 @@ Contributions are welcome! Feel free to submit a pull request.
 
 License
 
-MIT License
-
-This `README.md`:
-✅ Explains the project  
-✅ Includes the folder structure  
-✅ Describes features & installation  
-✅ Provides usage instructions  
-✅ Adds placeholders for **screenshots**  
+MIT License 
