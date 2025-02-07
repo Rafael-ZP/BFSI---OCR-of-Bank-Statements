@@ -10,6 +10,7 @@
 
 BFSI_OCR/         
 │── Semi_Supervised/
+
 │   ├── Api_Integration.py      # Fetches financial data via APIs
 │   ├── init.py
 │── Supervised/
